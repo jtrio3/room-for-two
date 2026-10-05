@@ -1,0 +1,10 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# Netlify automatically installs its Next.js adapter.
+# Add SUPABASE_URL and SUPABASE_SECRET_KEY in the Netlify dashboard,
+# with Functions and Builds scopes. Never put secrets in this file.
