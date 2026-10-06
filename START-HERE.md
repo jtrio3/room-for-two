@@ -2,11 +2,13 @@
 
 This folder is the converted app: **Next.js + Supabase + Netlify**. It contains the full application source. There is no Cloudflare account or Sites setup involved.
 
+**Already using the live app?** Follow [UPDATE-LIVE-SITE.md](UPDATE-LIVE-SITE.md) instead. Keep your existing project, repository, and full shared plan URL.
+
 ## 1. Create a Supabase project
 
 Open https://supabase.com/dashboard and create a project. Save its database password.
 
-Open **SQL Editor → New query**, copy the entire contents of `supabase/setup.sql`, and run it. This creates the three tables and the saving functions. It is safe to run the same setup file again; it preserves existing records. Use a fresh project or a project without unrelated tables named `plans`, `items`, or `backups`.
+Open **SQL Editor → New query**, copy the entire contents of `supabase/setup.sql`, and run it. This creates the four tables and the saving functions. It is safe to run the same setup file again; it preserves existing records. Use a fresh project or a project without unrelated tables named `plans`, `items`, `backups`, or `item_groups`.
 
 No Supabase Auth configuration is required. Do not add public read/write policies to the tables: the app's server checks the shared edit link on every request.
 

@@ -9,10 +9,11 @@ export const sampleItem = (changes = {}) => ({
   url: 'https://example.com/sofa', image: '', regular: 50000, sale: 40000, notes: 'Measure before buying.', backups: [], ...changes,
 });
 export const sampleBackup = (changes = {}) => ({ id: randomUUID(), name: 'Backup sofa', url: '', image: '', regular: 35000, sale: null, notes: '', ...changes });
-export async function testDatabase() {
+export const sampleGroup = (changes = {}) => ({ id: randomUUID(), name: 'TV setup', notes: 'Check connections before buying.', ...changes });
+export async function testDatabase(schema = new URL('../supabase/setup.sql', import.meta.url)) {
   const db = new PGlite();
   await db.exec('CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role BYPASSRLS;');
-  const setup = await readFile(new URL('../supabase/setup.sql', import.meta.url), 'utf8');
+  const setup = await readFile(schema, 'utf8');
   await db.exec(setup);
   await db.exec('SET ROLE service_role');
   return db;

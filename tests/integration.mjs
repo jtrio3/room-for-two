@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { testDatabase, rpc, capability, sampleItem, sampleBackup } from './support.mjs';
 
@@ -85,6 +86,45 @@ try {
   result = await call('PATCH', { action: 'save', revision: plan.revision, item: lamp });
   assert.equal(result.status, 200, JSON.stringify(result.data));
   plan = result.data;
+  assert.deepEqual(plan.items.map(i => i.id), [sofa.id, lamp.id], 'New items append automatically');
+  const group = { id: randomUUID(), name: 'TV setup', notes: 'Check mounting compatibility' };
+  result = await call('PATCH', { action: 'saveGroup', revision: plan.revision, group, itemIds: [sofa.id, lamp.id] });
+  assert.equal(result.status, 200, JSON.stringify(result.data));
+  plan = result.data;
+  assert.equal(plan.groups[0].name, group.name);
+  assert.ok(plan.items.every(i => i.groupId === group.id));
+  assert.equal(plan.items.length, 2);
+  assert.equal((await call('PATCH', { action: 'removeGroup', revision: plan.revision - 1, id: group.id })).status, 409);
+  const currentSofa = plan.items.find(i => i.id === sofa.id);
+  const legacySave = { ...currentSofa, priority: 2, sale: currentSofa.regular + 5000 };
+  delete legacySave.groupId;
+  result = await call('PATCH', { action: 'save', revision: plan.revision, item: legacySave });
+  assert.equal(result.status, 200, JSON.stringify(result.data));
+  plan = result.data;
+  assert.equal(plan.items[0].id, sofa.id, 'Editing cannot change manual position');
+  assert.equal(plan.items[0].groupId, group.id, 'Legacy clients preserve membership');
+  assert.ok(plan.items[0].sale > plan.items[0].regular, 'Expected price can exceed current');
+  const inlineGroup = { id: randomUUID(), name: 'Reading corner', notes: '' };
+  const extra = sampleItem({ name: 'Side table', groupId: inlineGroup.id, priority: 1 });
+  const beforeInvalid = structuredClone(plan);
+  result = await call('PATCH', { action: 'save', revision: plan.revision, item: { ...extra, groupId: group.id }, newGroup: inlineGroup });
+  assert.equal(result.status, 400);
+  assert.deepEqual((await call()).data, beforeInvalid, 'Invalid inline group saves leave no data');
+  result = await call('PATCH', { action: 'save', revision: plan.revision, item: extra, newGroup: inlineGroup });
+  assert.equal(result.status, 200, JSON.stringify(result.data));
+  plan = result.data;
+  assert.equal(plan.items.at(-1).id, extra.id);
+  assert.equal(plan.groups.length, 2);
+  result = await call('PATCH', { action: 'delete', revision: plan.revision, id: extra.id });
+  assert.equal(result.status, 200);
+  plan = result.data;
+  assert.ok(plan.groups.some(g => g.id === inlineGroup.id), 'Empty groups remain');
+  const beforeRemove = plan.items.map(({ groupId, ...item }) => item);
+  result = await call('PATCH', { action: 'removeGroup', revision: plan.revision, id: group.id });
+  assert.equal(result.status, 200, JSON.stringify(result.data));
+  plan = result.data;
+  assert.ok(plan.items.every(i => i.groupId === null));
+  assert.deepEqual(plan.items.map(({ groupId, ...item }) => item), beforeRemove, 'Removing a group preserves purchases');
   result = await call('PATCH', { action: 'reorder', revision: plan.revision, ids: [lamp.id, sofa.id] });
   assert.equal(result.status, 200, JSON.stringify(result.data));
   plan = result.data;
@@ -95,7 +135,11 @@ try {
   plan = result.data;
   assert.equal(plan.items.length, 1);
   assert.equal((await call('PATCH', { action: 'save', revision: oldRevision, item: sofa })).status, 409);
-  console.log('PASS: production Next.js page + API, Supabase SDK, real PostgreSQL SQL, cloud-outage recovery, authorization, CRUD, backups, reorder, zero prices, persistence and concurrent-edit conflicts.');
+  console.log('PASS: production Next.js page + API, Supabase SDK, PostgreSQL, groups, atomic inline creation, expected prices, append/manual order, preserved membership, backups, recovery and concurrent-edit conflicts.');
+  if (process.argv.includes('--preview')) {
+    console.log('Isolated UI test app: ' + origin);
+    await new Promise(resolve => { process.once('SIGINT', resolve); process.once('SIGTERM', resolve); });
+  }
 } catch (error) {
   console.error(error);
   if (output) console.error(output);
