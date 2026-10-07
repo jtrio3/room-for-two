@@ -5,6 +5,7 @@ const revision = z.number().int().min(0).max(2147483646);
 export const mutationSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('save'), revision, item: itemSchema, newGroup: groupSchema.optional() }),
   z.object({ action: z.literal('delete'), revision, id: z.string().uuid() }),
+  z.object({ action: z.literal('purchase'), revision, id: z.string().uuid(), price: z.number().int().min(0).max(100000000).nullable() }),
   z.object({ action: z.literal('reorder'), revision, ids: z.array(z.string().uuid()).max(300) }),
   z.object({ action: z.literal('settings'), revision, settings: settingsSchema }),
   z.object({

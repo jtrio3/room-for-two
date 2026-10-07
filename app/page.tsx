@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import { House, Plus, Heart, Gift, CalendarDays, Link2, CloudCheck, CloudOff, GripVertical, Pencil, Layers, Tag, RefreshCw, Copy, LoaderCircle, Info, ListOrdered } from 'lucide-react';
+import { House, Plus, Heart, Gift, CalendarDays, Link2, CloudCheck, CloudOff, GripVertical, Pencil, Layers, Tag, RefreshCw, Copy, LoaderCircle, Info, ListOrdered, Receipt, Check } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogContent, AlertDialogTitle, AlertDialogDescription, AlertDialogCancel, AlertDialogFooter } from '@/components/ui/alert-dialog';
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@/components/ui/select';
@@ -10,7 +10,7 @@ import { Progress } from '@/components/ui/progress';
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription, EmptyMedia } from '@/components/ui/empty';
 import { Toaster } from '@/components/ui/sonner';
 import { toast } from 'sonner';
-import { rooms, metrics, money, effectivePrice, emptyItem, settingsSchema, moveItem, promote } from '@/lib/planner';
+import { rooms, metrics, money, effectivePrice, isPurchased, emptyItem, settingsSchema, moveItem, promote } from '@/lib/planner';
 import type { Group, Item, Plan } from '@/lib/planner';
 import { PlanSession, resolvePlanAccess, accessStorageKey, pendingStorageKey } from '@/lib/client';
 import type { PlanAccess, PlanSessionId } from '@/lib/client';
@@ -18,13 +18,15 @@ import { ItemEditor, PriceInput } from '@/components/planner/item-editor';
 import type { ItemSaveMutation } from '@/components/planner/item-editor';
 import { GroupEditor } from '@/components/planner/group-editor';
 import type { GroupMutation } from '@/components/planner/group-editor';
+import { PurchaseEditor } from '@/components/planner/purchase-editor';
+import type { PurchaseMutation } from '@/components/planner/purchase-editor';
 import { ShoppingList } from '@/components/planner/shopping-list';
 type SaveResult = {
     ok: boolean;
     error?: string;
     conflict?: Plan;
 };
-type Mutation = ItemSaveMutation | GroupMutation | { action: 'delete'; id: string } | { action: 'reorder'; ids: string[] } | { action: 'settings'; settings: { personal: number; gift: number; moveMonth: string } };
+type Mutation = ItemSaveMutation | GroupMutation | PurchaseMutation | { action: 'delete'; id: string } | { action: 'reorder'; ids: string[] } | { action: 'settings'; settings: { personal: number; gift: number; moveMonth: string } };
 const defaultPlan: Plan = { id: '', revision: 0, personal: 1000000, gift: 200000, moveMonth: '2026-11', updatedAt: 0, items: [], groups: [] };
 const monthLabel = (month: string) => new Date(month + '-15T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 const errorText = (e: unknown) => e instanceof Error ? e.message : 'Something went wrong. Please try again.';
@@ -63,6 +65,8 @@ export default function Home() {
     const [syncError, setSyncError] = useState('');
     const [busy, setBusy] = useState(false);
     const [editor, setEditor] = useState<Item | null>(null);
+    const [purchaseEditor, setPurchaseEditor] = useState<Item | null>(null);
+    const [purchaseFilter, setPurchaseFilter] = useState('all');
     const [groupEditor, setGroupEditor] = useState<{group:Group|null}|null>(null);
     const [view, setView] = useState<'items'|'groups'>('items');
     const [collapsedGroups, setCollapsedGroups] = useState<string[]>([]);
@@ -83,7 +87,7 @@ export default function Home() {
     const busyRef = useRef(false);
     const loadingRef = useRef(true);
     const editingRef = useRef(false);
-    editingRef.current = !!editor || budgetOpen || !!deleting || !!groupEditor;
+    editingRef.current = !!editor || budgetOpen || !!deleting || !!groupEditor || !!purchaseEditor;
     const initPromise = useRef<Promise<void> | null>(null);
     const dragCleanup = useRef<(() => void) | null>(null);
     const applyPlan = useCallback((identity: PlanSessionId, next: Plan) => { if (!session.accept(identity, next))
@@ -113,6 +117,7 @@ export default function Home() {
             setPlan(null);
             setEditor(null);
             setGroupEditor(null);
+            setPurchaseEditor(null);
             setBudgetOpen(false);
             setDeleting(null);
             setShareOpen(false);
@@ -134,6 +139,7 @@ export default function Home() {
             setPlan(null);
             setEditor(null);
             setGroupEditor(null);
+            setPurchaseEditor(null);
             setBudgetOpen(false);
             setDeleting(null);
             setDeleteError('');
@@ -255,7 +261,7 @@ export default function Home() {
         toast.success('List order updated');
     } };
     function startDrag(e: ReactPointerEvent<HTMLButtonElement>, id: string) {
-        if (view !== 'items' || sort !== 'priority' || filter !== 'all' || busyRef.current || loadingRef.current || !e.isPrimary || e.button !== 0)
+        if (view !== 'items' || sort !== 'priority' || filter !== 'all' || purchaseFilter !== 'all' || busyRef.current || loadingRef.current || !e.isPrimary || e.button !== 0)
             return;
         dragCleanup.current?.();
         e.preventDefault();
@@ -321,7 +327,10 @@ export default function Home() {
     const data = plan ?? defaultPlan;
     const m = metrics(data);
     const activeSort = view === 'groups' ? 'priority' : sort;
-    const visible = data.items.filter(i => filter === 'all' || i.need === filter).sort((a, b) =>
+    const statusItems = data.items.filter(i => purchaseFilter === 'all' || (purchaseFilter === 'purchased' ? isPurchased(i) : !isPurchased(i)));
+    const statusNow = statusItems.filter(i => i.need === 'now').length;
+    const filtersActive = filter !== 'all' || purchaseFilter !== 'all';
+    const visible = statusItems.filter(i => filter === 'all' || i.need === filter).sort((a, b) =>
         activeSort === 'price-high' ? (effectivePrice(b) ?? -1) - (effectivePrice(a) ?? -1) :
         activeSort === 'price-low' ? (effectivePrice(a) ?? Infinity) - (effectivePrice(b) ?? Infinity) :
         activeSort === 'name' ? a.name.localeCompare(b.name) : a.priority - b.priority);
@@ -329,28 +338,29 @@ export default function Home() {
     const preview = !plan;
     const remainingText = m.remaining < 0 ? money(-m.remaining) + ' over budget' : money(m.remaining) + ' left';
     const canShowList = visible.length > 0 || (view === 'groups' && (data.groups?.length ?? 0) > 0);
-    const reorderEnabled = view === 'items' && filter === 'all' && sort === 'priority' && !loading;
+    const reorderEnabled = view === 'items' && !filtersActive && sort === 'priority' && !loading;
     const itemList = canShowList ? <ShoppingList
-        plan={data} visible={visible} groupView={view === 'groups'} filter={filter} busy={busy || loading}
+        plan={data} visible={visible} groupView={view === 'groups'} filterActive={filtersActive} busy={busy || loading}
         reorderEnabled={reorderEnabled} expanded={expanded} dragging={dragging} dropTarget={dropTarget} collapsed={collapsedGroups}
-        onToggleBackup={id => setExpanded(expanded === id ? null : id)} onEdit={setEditor}
+        onToggleBackup={id => setExpanded(expanded === id ? null : id)} onEdit={setEditor} onPurchase={setPurchaseEditor}
         onGroup={group => setGroupEditor({ group })} onStartDrag={startDrag}
         onMove={(item, offset) => { if (reorderEnabled) void reorder(item.id, item.priority + offset); }}
         onToggleGroup={id => rememberView(view, collapsedGroups.includes(id) ? collapsedGroups.filter(g => g !== id) : [...collapsedGroups, id])}
-        onAddToGroup={id => openNew(id)} onClearFilter={() => setFilter('all')}
+        onAddToGroup={id => openNew(id)} onClearFilter={() => { setFilter('all'); setPurchaseFilter('all'); }}
         onPromote={async (item, optionId) => {
+            if (isPurchased(item)) return;
             const result = await mutate({ action: 'save', item: promote(item, optionId) });
             if (!result.ok) toast.error(result.error);
             else toast.success('Main choice updated. Your previous choice is now a backup.');
         }}
     /> : <Empty className="empty-state"><EmptyHeader>
         <EmptyMedia className="empty-icon"><House size={32}/></EmptyMedia>
-        <EmptyTitle>{loading ? 'Opening your shared plan…' : loadError ? 'Let’s reconnect your plan.' : filter !== 'all' ? 'Nothing with this timing yet.' : 'Every home starts somewhere.'}</EmptyTitle>
-        <EmptyDescription>{loading ? 'Your list and budget will be ready in a moment.' : loadError || (filter !== 'all' ? 'Change an item’s timing or add something new.' : 'Add the first thing you need for your new space. Compare options and work out the details together.')}</EmptyDescription>
+        <EmptyTitle>{loading ? 'Opening your shared plan…' : loadError ? 'Let’s reconnect your plan.' : filtersActive ? 'No items match these filters.' : 'Every home starts somewhere.'}</EmptyTitle>
+        <EmptyDescription>{loading ? 'Your list and budget will be ready in a moment.' : loadError || (filtersActive ? 'Try another purchase status or timing to see more of your list.' : 'Add the first thing you need for your new space. Compare options and work out the details together.')}</EmptyDescription>
     </EmptyHeader>{loadError ? <button className="button secondary" onClick={() => void initialize()}><RefreshCw size={16}/> Try again</button> :
-        !loading && <button className="button primary" onClick={() => openNew()}><Plus size={17}/> Add your first item</button>}</Empty>;
+        !loading && (filtersActive ? <button className="button secondary" onClick={() => { setFilter('all'); setPurchaseFilter('all'); }}>Show all items</button> : <button className="button primary" onClick={() => openNew()}><Plus size={17}/> Add your first item</button>)}</Empty>;
     return <>
-        <Toaster position="bottom-center" theme="light" richColors className={editor || groupEditor || budgetOpen || deleting ? 'toaster-suspended' : 'toaster'}/>
+        <Toaster position="bottom-center" theme="light" richColors className={editor || groupEditor || purchaseEditor || budgetOpen || deleting ? 'toaster-suspended' : 'toaster'}/>
         <header className="topbar">
             <div className="brand"><span className="brand-mark"><House size={23}/></span>room for two<span className="brand-dot">.</span></div>
             <span className="top-note">A little planning. A lot of home.</span>
@@ -369,20 +379,26 @@ export default function Home() {
                     <div className="between"><span>Total budget</span><button className="budget-edit" disabled={preview || busy || loading} aria-label="Edit budget" onClick={() => setBudgetOpen(true)}><Pencil size={15}/><span>Edit</span></button></div>
                     <strong>{money(m.total)}<span>{m.total % 100 === 0 ? '.00' : ''}</span></strong>
                     <div className="budget-sources"><span>{money(data.personal)} personal</span><span><Gift size={14}/> {money(data.gift)} family gift</span></div>
-                    <Progress className="budget-track" value={Math.min(100, m.allocated ?? 0)} aria-label="Budget allocated at expected prices"/>
+                    <Progress className="budget-track" value={Math.min(100, m.allocated ?? 0)} aria-label="Budget allocated to planned purchases"/>
                     <div className="between small"><span>{m.allocated === null ? 'No budget set' : m.allocated.toFixed(1) + '% allocated'}</span><span>{remainingText}</span></div>
                 </div>
                 <div className="metrics">
-                    <div className="expected-metric"><span>Expected spend</span><strong className="blue-text">{money(m.expected)}</strong><small>Current prices: {money(m.current)}{m.unknownCurrent ? ' · ' + m.unknownCurrent + ' unset' : ''}</small></div>
-                    <div><span>{m.remaining < 0 ? 'Over budget' : 'Remaining budget'}</span><strong>{money(Math.abs(m.remaining))}</strong><small>Based on expected spend</small></div>
-                    <div><span><Tag size={13}/> Potential savings</span><strong>{money(m.savings)}</strong><small>{m.overage > 0 ? money(m.overage) + ' expected above current on other items' : 'Expected versus current prices'}</small></div>
-                    <div><span>Immediate needs</span><strong>{money(m.immediate)}</strong><small>{now} item{now === 1 ? '' : 's'} at expected prices</small></div>
+                    <div className="expected-metric"><span>Budgeted total</span><strong className="blue-text">{money(m.budgeted)}</strong><small>High-end estimates: {money(m.highEnd)}{m.unknownCurrent ? ' · ' + m.unknownCurrent + ' unset' : ''}</small></div>
+                    <div><span>{m.remaining < 0 ? 'Over budget' : 'Unallocated budget'}</span><strong>{money(Math.abs(m.remaining))}</strong><small>Total budget minus budgeted amounts</small></div>
+                    <div><span><Tag size={13}/> Planning cushion</span><strong>{money(m.cushion)}</strong><small>{m.overage > 0 ? money(m.overage) + ' budgeted above high-end on other items' : 'High-end estimates minus budgeted amounts'}</small></div>
+                    <div><span>Immediate needs</span><strong>{money(m.immediate)}</strong><small>{now} item{now === 1 ? '' : 's'} at budgeted amounts</small></div>
                 </div>
             </section>
             {(m.unknown > 0 || m.usingCurrent > 0) && <div className="price-warning"><Info size={16}/><div>
-                {m.unknown > 0 && <p>{m.unknown} item{m.unknown === 1 ? ' is' : 's are'} missing both prices. Budget totals are incomplete.</p>}
-                {m.usingCurrent > 0 && <p>{m.usingCurrent} item{m.usingCurrent === 1 ? ' uses its' : 's use their'} current price as an estimate until you add an expected price.</p>}
+                {m.unknown > 0 && <p>{m.unknown} item{m.unknown === 1 ? ' is' : 's are'} missing both amounts. Budget totals are incomplete.</p>}
+                {m.usingCurrent > 0 && <p>{m.usingCurrent} item{m.usingCurrent === 1 ? ' uses its' : 's use their'} high-end estimate until you add a budgeted amount.</p>}
             </div></div>}
+            <section className="actual-summary" aria-label="Purchase progress">
+                <div className="actual-spend"><span className="actual-icon"><Receipt size={23}/></span><div><span className="actual-label">Actual spent</span><strong>{money(m.actualSpent)}</strong><small>Recorded purchase prices only</small></div></div>
+                <div className="purchase-progress"><div><span><Check size={15}/> {m.purchasedCount} of {data.items.length} purchased</span><button className="text-button" disabled={preview || loading} onClick={() => { setPurchaseFilter('purchased'); setFilter('all'); document.querySelector('.shopping')?.scrollIntoView({behavior:'smooth', block:'start'}); }}>View purchased</button></div><Progress value={data.items.length ? m.purchasedCount / data.items.length * 100 : 0} aria-label="Items purchased"/>
+                    <div className="actual-projections"><div><span>Still to buy · {m.toBuyCount} items</span><strong>{money(m.toBuyBudgeted)}</strong><small>Budgeted{m.unknownToBuy > 0 ? ' · ' + m.unknownToBuy + ' missing an amount' : ''}</small></div><div><span>Projected final spend</span><strong className={m.projectedSpend > m.total ? 'danger-text' : ''}>{money(m.projectedSpend)}</strong><small>Paid + budgeted still to buy{m.unknownToBuy > 0 ? ' · incomplete' : ''}</small></div></div>
+                </div>
+            </section>
             <div className="main-grid">
                 <section className="shopping">
                     <div className="between list-heading"><div><h2>The shopping list <span className="count">{data.items.length}</span></h2><p className="muted small">Plan each purchase. Link what goes together.</p></div>
@@ -393,22 +409,27 @@ export default function Home() {
                         <button type="button" aria-pressed={view === 'items'} onClick={() => rememberView('items')}><ListOrdered size={16}/> Items</button>
                         <button type="button" aria-pressed={view === 'groups'} onClick={() => rememberView('groups')}><Layers size={16}/> Groups</button>
                     </div><span className="muted small">{view === 'groups' ? 'Related purchases, counted once.' : 'Drag to arrange your list.'}</span></div>
+                    <div className="purchase-filters" role="group" aria-label="Purchase status">
+                        <button type="button" aria-pressed={purchaseFilter === 'all'} onClick={() => setPurchaseFilter('all')}>Everything <span>{data.items.length}</span></button>
+                        <button type="button" aria-pressed={purchaseFilter === 'to-buy'} onClick={() => setPurchaseFilter('to-buy')}>To buy <span>{m.toBuyCount}</span></button>
+                        <button type="button" aria-pressed={purchaseFilter === 'purchased'} onClick={() => setPurchaseFilter('purchased')}><Check size={14}/> Purchased <span>{m.purchasedCount}</span></button>
+                    </div>
                     <Tabs value={filter} onValueChange={setFilter}>
                         <div className="list-toolbar">
-                            <TabsList className="filter-tabs" aria-label="Shopping timing"><TabsTrigger value="all">All items <span>{data.items.length}</span></TabsTrigger><TabsTrigger value="now">Immediate <span>{now}</span></TabsTrigger><TabsTrigger value="later">Can wait <span>{data.items.length - now}</span></TabsTrigger></TabsList>
-                            {view === 'items' ? <Choice label="Sort items" value={sort} onChange={setSort} options={[{ value: 'priority', label: 'Manual order' }, { value: 'price-high', label: 'Expected: high to low' }, { value: 'price-low', label: 'Expected: low to high' }, { value: 'name', label: 'Name: A to Z' }]}/> : <span className="muted small group-order-hint">Groups follow your manual order</span>}
+                            <TabsList className="filter-tabs" aria-label="Shopping timing"><TabsTrigger value="all">Any timing <span>{statusItems.length}</span></TabsTrigger><TabsTrigger value="now">Immediate <span>{statusNow}</span></TabsTrigger><TabsTrigger value="later">Can wait <span>{statusItems.length - statusNow}</span></TabsTrigger></TabsList>
+                            {view === 'items' ? <Choice label="Sort items" value={sort} onChange={setSort} options={[{ value: 'priority', label: 'Manual order' }, { value: 'price-high', label: 'Budgeted: high to low' }, { value: 'price-low', label: 'Budgeted: low to high' }, { value: 'name', label: 'Name: A to Z' }]}/> : <span className="muted small group-order-hint">Groups follow your manual order</span>}
                         </div>
                         {['all', 'now', 'later'].map(tab => <TabsContent key={tab} value={tab}>{itemList}</TabsContent>)}
                     </Tabs>
-                    {data.items.length > 0 && <div className="list-foot"><span><GripVertical size={14}/>{reorderEnabled ? 'Drag the handles to arrange your list. Arrow keys work too.' : 'Choose Items, All items, and Manual order to rearrange.'}</span><span>Estimates exclude tax & delivery.</span></div>}
+                    {data.items.length > 0 && <div className="list-foot"><span><GripVertical size={14}/>{reorderEnabled ? 'Drag the handles to arrange your list. Arrow keys work too.' : 'Choose Items, Everything, Any timing, and Manual order to rearrange.'}</span><span>Include tax & delivery in your amounts as needed.</span></div>}
                 </section>
                 <aside>
                     <div className="home-card"><img src="https://images.unsplash.com/photo-1713283391486-b92cda2562e8?auto=format&fit=crop&w=1000&q=85" alt="A sunlit living room with a blue sofa" referrerPolicy="no-referrer"/><div><p className="eyebrow">MAKING IT OURS</p><h2>A place for us.</h2><p>{monthLabel(data.moveMonth)} <Heart size={15}/></p></div></div>
-                    {data.items.length > 0 && <div className="room-breakdown"><h3>Expected spend by room</h3>{rooms.map(room => {
+                    {data.items.length > 0 && <div className="room-breakdown"><h3>Budgeted by room</h3>{rooms.map(room => {
                         const items = data.items.filter(i => i.room === room);
                         if (!items.length) return null;
                         const cost = items.reduce((sum, item) => sum + (effectivePrice(item) ?? 0), 0);
-                        return <div key={room}><div className="between"><span>{room}</span><strong>{money(cost)}</strong></div><Progress value={m.expected ? cost / m.expected * 100 : 0} aria-label={room + ' share of expected spend'}/></div>;
+                        return <div key={room}><div className="between"><span>{room}</span><strong>{money(cost)}</strong></div><Progress value={m.budgeted ? cost / m.budgeted * 100 : 0} aria-label={room + ' share of budgeted spend'}/></div>;
                     })}</div>}
                     <div className="note-card"><span className="eyebrow">BLACK FRIDAY GAME PLAN</span><h3>Know your must-haves.</h3><p>Plan for the full setup, then leave a little room for the deals worth waiting for.</p><span className="tag">Plan now. Compare before you buy.</span></div>
                 </aside>
@@ -429,6 +450,11 @@ export default function Home() {
             }
             return result;
         }} onClose={() => setGroupEditor(null)}/>}
+        {purchaseEditor && plan && <PurchaseEditor key={purchaseEditor.id} item={purchaseEditor} plan={plan} busy={busy} onSave={async (mutation, revision) => {
+            const result = await mutate(mutation, revision);
+            if (result.ok) toast.success(mutation.price === null ? 'Marked as not purchased. Actual spent updated.' : 'Purchase saved. Actual spent updated.');
+            return result;
+        }} onClose={() => setPurchaseEditor(null)}/>}
         {budgetOpen && plan && <BudgetEditor plan={plan} busy={busy} onSave={mutate} onClose={() => setBudgetOpen(false)}/>}
  <Dialog open={shareOpen} onOpenChange={setShareOpen}><DialogContent className="share-dialog"><span className="share-icon"><Link2 size={24}/></span><DialogTitle>A plan for the two of you.</DialogTitle><DialogDescription>Send this link to your partner or open it on another device. No account needed.</DialogDescription><label className="field" htmlFor="share-link">Your shared edit link<input id="share-link" readOnly value={shareLink} onFocus={e => e.target.select()}/></label><button className="button primary" onClick={async () => { try {
         await navigator.clipboard.writeText(shareLink);
@@ -440,11 +466,12 @@ export default function Home() {
         input.select();
         toast.info('Select and copy the link above.');
     } }}><Copy size={16}/> Copy shared link</button><p className="form-help"><Info size={15}/> Anyone with this link can view and edit the plan. Keep a copy to reopen it if you clear your browser data.</p></DialogContent></Dialog>
- <AlertDialog open={!!deleting} onOpenChange={o => !o && !busy && setDeleting(null)}><AlertDialogContent><AlertDialogTitle>Remove {deleting?.name}?</AlertDialogTitle><AlertDialogDescription>This removes the item and all its backup options from your shared plan.</AlertDialogDescription>{deleteError && <div className="error-box" role="alert">{deleteError}</div>}<AlertDialogFooter><AlertDialogCancel disabled={busy}>Keep item</AlertDialogCancel><button className="button danger" disabled={busy} onClick={async () => { if (!deleting)
+ <AlertDialog open={!!deleting} onOpenChange={o => !o && !busy && setDeleting(null)}><AlertDialogContent><AlertDialogTitle>Remove {deleting?.name}?</AlertDialogTitle><AlertDialogDescription>This removes the item and all its backup options from your shared plan.{deleting && isPurchased(deleting) && <> Its {money(deleting.purchasePrice!)} purchase price will also be removed from Actual spent.</>}</AlertDialogDescription>{deleteError && <div className="error-box" role="alert">{deleteError}</div>}<AlertDialogFooter><AlertDialogCancel disabled={busy}>Keep item</AlertDialogCancel><button className="button danger" disabled={busy} onClick={async () => { if (!deleting)
         return; const r = await mutate({ action: 'delete', id: deleting.id }); if (r.ok) {
         setDeleting(null);
         setEditor(null);
             setGroupEditor(null);
+            setPurchaseEditor(null);
         toast.success('Item removed');
     }
     else

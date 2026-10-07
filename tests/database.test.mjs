@@ -340,3 +340,188 @@ test('group limit accepts edits and removals but rejects creation beyond 100', a
   plan = (await mutate({ action: 'saveGroup', group: extra, itemIds: [] })).plan;
   assert.equal(plan.groups.length, 100);
 });
+
+const purchaseUpgradeSql = () => readFile(new URL('../supabase/migrations/20261006_purchase_tracking.sql', import.meta.url), 'utf8');
+const actualTotal = (plan) => plan.items.reduce((sum, item) => sum + (item.purchasePrice ?? 0), 0);
+const withoutPurchase = (items) => items.map(({ purchasePrice, ...item }) => item);
+
+test('purchase tracking is explicit, revision guarded, and isolated from planning edits', async (t) => {
+  const db = await testDatabase();
+  t.after(() => db.close());
+  const key = hash(capability());
+  const otherKey = hash(capability());
+  let plan = await rpc(db, 'planner_create', { p_key_hash: key });
+  const read = () => rpc(db, 'planner_read', { p_key_hash: key });
+  const mutate = (action, revision = plan.revision, keyHash = key) => rpc(db, 'planner_mutate', { p_key_hash: keyHash, p_revision: revision, p_action: action });
+  const save = async (action) => {
+    const result = await mutate(action);
+    assert.equal(result.status, 200, result.error);
+    assert.equal(result.plan.revision, plan.revision + 1);
+    plan = result.plan;
+    return plan;
+  };
+  const tv = sampleItem({ name: 'TV', regular: 99900, sale: 89900, backups: [sampleBackup()] });
+  const mount = sampleItem({ name: 'Wall mount', regular: 12000, sale: 9900 });
+  const group = sampleGroup();
+  await t.test('new items are unpurchased and only a purchase action can set the amount', async () => {
+    // Even an extra purchasePrice in a save payload cannot bypass the dedicated action.
+    await save({ action: 'save', item: { ...tv, purchasePrice: 5000 } });
+    await save({ action: 'save', item: mount });
+    await save({ action: 'saveGroup', group, itemIds: [tv.id, mount.id] });
+    assert.deepEqual(plan.items.map(item => item.purchasePrice), [null, null]);
+    const plannedItems = withoutPurchase(plan.items);
+    await save({ action: 'purchase', id: tv.id, price: 92001 });
+    assert.deepEqual(plan.items.map(item => item.purchasePrice), [92001, null]);
+    assert.equal(actualTotal(plan), 92001);
+    assert.deepEqual(withoutPurchase(plan.items), plannedItems);
+    assert.deepEqual(await read(), plan);
+  });
+  await t.test('a zero-cost purchase counts as purchased and editing a price replaces its contribution', async () => {
+    await save({ action: 'purchase', id: mount.id, price: 0 });
+    assert.equal(plan.items.filter(item => item.purchasePrice !== null).length, 2);
+    assert.equal(actualTotal(plan), 92001);
+    await save({ action: 'purchase', id: tv.id, price: 87050 });
+    assert.equal(actualTotal(plan), 87050);
+    assert.equal(plan.items.length, 2);
+    assert.deepEqual(await read(), plan);
+  });
+  await t.test('invalid purchase amounts and IDs preserve the full state and revision', async () => {
+    for (const price of [-1, 0.5, 100000001, '1200', 'null', {}, [], false]) {
+      assert.equal((await mutate({ action: 'purchase', id: tv.id, price })).status, 400);
+      assert.deepEqual(await read(), plan);
+    }
+    for (const action of [
+      { action: 'purchase', id: tv.id },
+      { action: 'purchase', id: 'invalid', price: 100 },
+      { action: 'purchase', id: null, price: 100 },
+      { action: 'purchase', price: 100 },
+    ]) {
+      assert.equal((await mutate(action)).status, 400);
+      assert.deepEqual(await read(), plan);
+    }
+    assert.equal((await mutate({ action: 'purchase', id: sampleItem().id, price: 100 })).status, 404);
+    assert.deepEqual(await read(), plan);
+    await assert.rejects(db.query('UPDATE public.items SET purchase_price=-1 WHERE plan_id=$1 AND id=$2', [plan.id, tv.id]), /check constraint/);
+    assert.deepEqual(await read(), plan);
+  });
+  await t.test('legacy item saves, forged purchase fields, and backup changes preserve actual spend', async () => {
+    const { purchasePrice, ...legacyItem } = plan.items[0];
+    await save({ action: 'save', item: { ...legacyItem, name: 'New TV label', sale: 91000 } });
+    assert.equal(plan.items[0].purchasePrice, purchasePrice);
+    await save({ action: 'save', item: { ...plan.items[0], purchasePrice: null, backups: [sampleBackup({ name: 'A different backup' })] } });
+    assert.equal(plan.items[0].purchasePrice, purchasePrice);
+    assert.equal(plan.items[0].backups[0].name, 'A different backup');
+    await save({ action: 'save', item: { ...plan.items[0], purchasePrice: 1 } });
+    assert.equal(actualTotal(plan), 87050);
+    await save({ action: 'saveGroup', group: { ...group, name: 'Living room setup' }, itemIds: [tv.id] });
+    await save({ action: 'reorder', ids: [mount.id, tv.id] });
+    await save({ action: 'removeGroup', id: group.id });
+    assert.equal(plan.items.find(item => item.id === tv.id).purchasePrice, purchasePrice);
+    assert.equal(actualTotal(plan), 87050);
+  });
+  await t.test('stale purchase and undo requests return the newest plan without changing it', async () => {
+    const oldRevision = plan.revision;
+    await save({ action: 'purchase', id: mount.id, price: 100000000 });
+    for (const price of [1200, null]) {
+      const result = await mutate({ action: 'purchase', id: mount.id, price }, oldRevision);
+      assert.equal(result.status, 409);
+      assert.deepEqual(result.plan, plan);
+      assert.deepEqual(await read(), plan);
+    }
+  });
+  await t.test('another plan cannot purchase this plan’s items even with a known or reused UUID', async () => {
+    let other = await rpc(db, 'planner_create', { p_key_hash: otherKey });
+    const foreign = sampleItem({ name: 'Other household only' });
+    other = (await mutate({ action: 'save', item: foreign }, other.revision, otherKey)).plan;
+    assert.equal((await mutate({ action: 'purchase', id: foreign.id, price: 100 })).status, 404);
+    assert.deepEqual(await read(), plan);
+    assert.deepEqual(await rpc(db, 'planner_read', { p_key_hash: otherKey }), other);
+    other = (await mutate({ action: 'save', item: { ...tv, name: 'Separate TV' } }, other.revision, otherKey)).plan;
+    const result = await mutate({ action: 'purchase', id: tv.id, price: 2345 }, other.revision, otherKey);
+    assert.equal(result.status, 200, result.error);
+    other = result.plan;
+    assert.equal(actualTotal(other), 2345);
+    assert.deepEqual(await read(), plan);
+    assert.equal((await mutate({ action: 'purchase', id: tv.id, price: null }, 0, hash(capability()))).status, 404);
+  });
+  await t.test('a failure after the amount is written rolls back the purchase and revision', async () => {
+    await db.exec(`RESET ROLE;
+      CREATE FUNCTION public.test_reject_revision() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN RAISE check_violation USING MESSAGE = 'forced rollback'; END; $$;
+      CREATE TRIGGER test_reject_revision BEFORE UPDATE ON public.plans FOR EACH ROW EXECUTE FUNCTION public.test_reject_revision();
+      SET ROLE service_role;`);
+    const result = await mutate({ action: 'purchase', id: tv.id, price: 3333 });
+    assert.equal(result.status, 400);
+    assert.deepEqual(await read(), plan);
+    await db.exec('RESET ROLE; DROP TRIGGER test_reject_revision ON public.plans; DROP FUNCTION public.test_reject_revision(); SET ROLE service_role;');
+  });
+  await t.test('undo clears the purchase while preserving item data; deletion removes its actual contribution', async () => {
+    const prior = withoutPurchase(plan.items);
+    await save({ action: 'purchase', id: mount.id, price: null });
+    assert.equal(plan.items.find(item => item.id === mount.id).purchasePrice, null);
+    assert.equal(actualTotal(plan), 87050);
+    assert.deepEqual(withoutPurchase(plan.items), prior);
+    await save({ action: 'delete', id: tv.id });
+    assert.equal(actualTotal(plan), 0);
+    assert.equal(plan.items[0].priority, 1);
+    assert.equal((await mutate({ action: 'purchase', id: tv.id, price: 1 })).status, 404);
+    assert.deepEqual(await read(), plan);
+  });
+  await t.test('re-running purchase migration and full setup preserves recorded purchase prices', async () => {
+    await save({ action: 'purchase', id: mount.id, price: 0 });
+    await db.exec('RESET ROLE');
+    await db.exec(await purchaseUpgradeSql());
+    await db.exec(await purchaseUpgradeSql());
+    await db.exec(await readFile(new URL('../supabase/setup.sql', import.meta.url), 'utf8'));
+    await db.exec('SET ROLE service_role');
+    assert.deepEqual(await read(), plan);
+  });
+});
+
+test('v1.1 purchase migration preserves all existing data and starts every item unpurchased', async (t) => {
+  const db = await testDatabase(new URL('./fixtures/schema-v1.1.sql', import.meta.url));
+  t.after(() => db.close());
+  const key = hash(capability());
+  let plan = await rpc(db, 'planner_create', { p_key_hash: key });
+  const sofa = sampleItem({ backups: [sampleBackup({ sale: 0 }), sampleBackup({ regular: null })] });
+  const mount = sampleItem({ name: 'Existing wall mount', regular: null, sale: null });
+  const group = sampleGroup();
+  for (const action of [
+    { action: 'save', item: sofa }, { action: 'save', item: mount },
+    { action: 'saveGroup', group, itemIds: [sofa.id, mount.id] },
+    { action: 'reorder', ids: [mount.id, sofa.id] },
+    { action: 'settings', settings: { personal: 800000, gift: 250000, moveMonth: '2027-11' } },
+  ]) {
+    const result = await rpc(db, 'planner_mutate', { p_key_hash: key, p_revision: plan.revision, p_action: action });
+    assert.equal(result.status, 200, result.error);
+    plan = result.plan;
+  }
+  assert.equal('purchasePrice' in plan.items[0], false);
+  const snapshots = {};
+  for (const table of ['plans', 'items', 'backups', 'item_groups']) {
+    const condition = table === 'plans' ? 'id' : 'plan_id';
+    snapshots[table] = (await db.query(`SELECT * FROM public.${table} WHERE ${condition}=$1 ORDER BY id`, [plan.id])).rows;
+  }
+  await db.exec('RESET ROLE');
+  await db.exec(await purchaseUpgradeSql());
+  await db.exec(await purchaseUpgradeSql());
+  await db.exec('SET ROLE service_role');
+  const upgraded = await rpc(db, 'planner_read', { p_key_hash: key });
+  assert.deepEqual(upgraded, { ...plan, items: plan.items.map(item => ({ ...item, purchasePrice: null })) });
+  for (const table of ['plans', 'items', 'backups', 'item_groups']) {
+    const condition = table === 'plans' ? 'id' : 'plan_id';
+    let rows = (await db.query(`SELECT * FROM public.${table} WHERE ${condition}=$1 ORDER BY id`, [plan.id])).rows;
+    if (table === 'items') rows = rows.map(({ purchase_price, ...item }) => { assert.equal(purchase_price, null); return item; });
+    assert.deepEqual(rows, snapshots[table]);
+  }
+  const result = await rpc(db, 'planner_mutate', { p_key_hash: key, p_revision: upgraded.revision, p_action: { action: 'purchase', id: sofa.id, price: 40525 } });
+  assert.equal(result.status, 200, result.error);
+  assert.equal(actualTotal(result.plan), 40525);
+  assert.equal(result.plan.items[1].purchasePrice, 40525);
+  for (const role of ['anon', 'authenticated']) {
+    await db.exec(`RESET ROLE; SET ROLE ${role}`);
+    await assert.rejects(db.query('SELECT purchase_price FROM public.items'), /permission denied/);
+    await assert.rejects(db.query('SELECT public.planner_read($1)', [key]), /permission denied/);
+    await assert.rejects(db.query('SELECT public.planner_mutate($1,$2,$3::jsonb)', [key, result.plan.revision, JSON.stringify({ action: 'purchase', id: sofa.id, price: 1 })]), /permission denied/);
+  }
+});

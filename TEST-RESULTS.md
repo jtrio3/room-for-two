@@ -1,35 +1,45 @@
-# Version 1.1 verification
+# Version 1.2 verification
 
-Verified locally on October 6, 2026. These tests use synthetic data; no live Supabase project or Netlify deployment was changed.
+Verified locally on October 6, 2026, using synthetic plans. No live Supabase project or Netlify deployment was changed.
 
 | Check | Result |
 | --- | --- |
-| Production Next.js build, standard `npm run build` (Turbopack) | Passed |
-| Additional production build with Webpack | Passed |
+| Production Next.js build, standard `npm run build` | Passed |
 | TypeScript check | Passed |
-| Automated model, client, and PostgreSQL tests | 43 passed, 0 failed |
-| Production API integration | Passed |
-| Desktop and mobile browser workflows | Passed |
-| Mobile item editor at 320×568, 390×844, and 630×682 | Save footer stays separate from scrolling fields |
-| Same shared plan link in an independent browser session | Same items and totals loaded |
+| Automated model, client, and PostgreSQL tests | 60 passed, 0 failed |
+| Production API integration against isolated PostgreSQL | Passed |
+| Desktop purchase and shared-plan browser workflows | Passed |
+| Touch layouts at 320×568, 390×844, 430×932, and 630×682 | Passed |
+| Purchase and item form footers, tag spacing, horizontal overflow | Passed |
+| Browser runtime errors | None observed |
 
-The version 1.1 checks ran with Node.js 26.7.0. Netlify remains configured for Node 22, which was verified for the original conversion; dependencies did not change in this update. The deployment itself should still be checked after publishing.
+Checks ran with Node.js 26.7.0. Netlify remains configured for Node 22, as in the original conversion. Dependencies did not change in this update. These local checks do not verify the hosted deployment; finish the checks in UPDATE-LIVE-SITE.md after publishing.
 
 ## Automated tests
 
-Budget tests cover expected-price calculations, current-price fallback, known zero prices, incomplete totals, expected prices above current prices, savings and overages, and backup promotion. Group tests cover subtotals without double-counting, deterministic order, plan-scoped membership validation, and membership conflict reconciliation. Client tests cover stale responses, plan switching, request timeouts, and shared-link/session races.
+The 60 tests include existing plan, grouping, validation, concurrency, and ordering coverage plus purchase tracking. They check actual spending independently of planned budgets, zero-cost purchases, missing legacy purchase fields, undo, projected spending, backup exclusions, and prevention of backup promotion while purchased.
 
-PostgreSQL tests execute the actual schema, upgrade migration, and saving functions in an isolated PGlite database. The upgrade starts from the original schema and checks preserved plan access, revisions, prices, backups, and manual order. Tests also cover repeatable migration, append-only item creation, legacy clients omitting group membership, atomic inline creation, invalid-operation rollback, isolation between plans, browser-role denial, concurrent revisions, and group removal without losing purchases.
+PostgreSQL tests execute the actual SQL functions and migrations in isolated PGlite databases. The purchase upgrade starts from the original version 1.1 schema and verifies that plan access hashes, timestamps, groups, backups, existing amounts, and order survive. Tests also cover repeated migrations, invalid amounts, cross-plan access, stale requests, transaction rollback, and preservation of recorded payments through ordinary item and group edits. Only the dedicated purchase action changes a payment record.
 
-## Production API integration
+## Production integration
 
-The integration check starts the built Next.js server and routes its Supabase SDK calls through a local HTTP bridge to isolated PostgreSQL. It checks page serving, authorization, request origins and size limits, plan creation and persistence, item/backup edits, group operations, expected prices, automatic append and reorder, simultaneous-edit conflicts, and recovery after simulated storage failure. It supplies its own dummy credentials.
+The built Next.js server calls the Supabase SDK against a local HTTP bridge and isolated PostgreSQL, using dummy credentials. Checks cover authorization, request origin and size limits, plan persistence, items/backups/groups, inline group creation, purchase logging, correction and undo, a zero-dollar purchase, invalid prices, simultaneous edits, storage failure recovery, and manual order.
 
-## Browser checks
+## Browser workflows
 
-Headless Chrome exercised the actual production app on desktop and at three small viewport sizes. Checks included creating purchases, creating a group inline, linking existing purchases, filtered versus full group totals, removing a group while preserving items and the whole-plan spend, current-price fallback, zero expected price, automatic append, keyboard and pointer reordering with refresh, and opening the same shared link in a separate browser session.
+Headless Chrome exercised the built app with a synthetic shopping list. Verified:
 
-The item editor's scroll region ends above its footer, Save stays inside the viewport, and save notifications cannot cover the controls while a form is open. Screenshots were visually inspected after opening animations completed. No page/modal horizontal overflow or browser runtime errors were observed. This is browser-based mobile layout testing, not testing on a physical iPhone.
+- Budgeted amount and High-end estimate labels; planned totals remain unchanged when recording payments.
+- An empty actual price is rejected; paid amounts save and update the separate Actual spent summary.
+- Editing a recorded amount replaces its contribution; undo clears it after confirmation; a $0 purchase still counts.
+- Purchase-status and timing filters combine in Items and Groups; full group budgets remain distinct from filtered subtotals.
+- A second browser opens the same plan. Conflicting purchase edits preserve the draft, show the latest record, and require explicit review before retrying.
+- Ordinary item/backup edits keep the purchase amount. A purchased item's backup cannot be promoted until the purchase is undone.
+- Pointer reordering survives refresh.
+- Phone-size contexts use touch input. Timing and group pills have visible gaps, and the compact pill remains separate from its touch target.
+- Purchase and item editors scroll separately from their action bars. Save remains inside the viewport and unobstructed by notifications. There is no page or modal horizontal overflow at the tested widths.
+
+Screenshots were visually inspected after animations completed. These are browser-based mobile checks, not a physical iPhone test.
 
 ## Reproduce locally
 
@@ -42,4 +52,4 @@ npm test
 npm run test:integration
 ```
 
-The production API integration and automated tests do not require real Supabase credentials. For normal use, follow [UPDATE-LIVE-SITE.md](UPDATE-LIVE-SITE.md) and perform its final checks on your published site and second device.
+Automated and integration tests do not require real Supabase credentials. For the published site and a second device, follow [UPDATE-LIVE-SITE.md](UPDATE-LIVE-SITE.md).

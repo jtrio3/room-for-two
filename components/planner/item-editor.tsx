@@ -35,10 +35,10 @@ function ProductFields({ value, onChange, prefix }: { value: Option | Item; onCh
       <input id={prefix + 'name'} autoComplete="off" required maxLength={160} placeholder="e.g. A sofa for movie nights" value={value.name} onChange={e => onChange({ name: e.target.value })}/>
     </label>
     <div className="form-grid price-fields">
-      <PriceInput id={prefix + 'expected'} label="Expected price" value={value.sale} onChange={sale => onChange({ sale })}/>
-      <PriceInput id={prefix + 'current'} label="Current price" secondary value={value.regular} onChange={regular => onChange({ regular })}/>
+      <PriceInput id={prefix + 'expected'} label="Budgeted amount" value={value.sale} onChange={sale => onChange({ sale })}/>
+      <PriceInput id={prefix + 'current'} label="High-end estimate" secondary value={value.regular} onChange={regular => onChange({ regular })}/>
     </div>
-    <p className="price-field-help">Expected price is what you plan to spend. If it’s blank, we’ll use the current price as an estimate.</p>
+    <p className="price-field-help">Budgeted amount is what you plan to spend. High-end estimate is the most you think it could cost. If Budgeted is blank, we’ll use that estimate.</p>
     <label className="field" htmlFor={prefix + 'url'}>Purchase link<input id={prefix + 'url'} type="url" maxLength={2048} placeholder="https://store.com/item" value={value.url} onChange={e => onChange({ url: e.target.value })}/></label>
     <label className="field" htmlFor={prefix + 'image'}>Image link<input id={prefix + 'image'} type="url" maxLength={2048} placeholder="Paste a direct link to an item photo" value={value.image} onChange={e => onChange({ image: e.target.value })}/></label>
     {value.image && /^https?:\/\//i.test(value.image) && <div className="image-preview">
@@ -90,11 +90,13 @@ export function ItemEditor({ initial, plan, busy, onSave, onClose, onDelete }: {
     const parsed = itemSchema.safeParse({ ...draft, groupId: newGroup?.id ?? draft.groupId ?? null });
     if (!parsed.success) { setError(parsed.error.issues[0].message); return; }
     setError('');
-    const result = await onSave({ action: 'save', item: parsed.data, ...(newGroup ? { newGroup } : {}) }, forceRevision ?? revision);
+    const { purchasePrice: _purchasePrice, ...planningItem } = parsed.data;
+    const result = await onSave({ action: 'save', item: planningItem, ...(newGroup ? { newGroup } : {}) }, forceRevision ?? revision);
     if (result.ok) onClose();
     else { setError(result.error ?? 'Could not save.'); if (result.conflict) setConflict(result.conflict); }
   }
 
+  const purchasePrice = (conflict ?? plan).items.find(i => i.id === initial.id)?.purchasePrice;
   const latest = conflict?.items.find(i => i.id === initial.id);
   const latestGroupName = latest?.groupId ? groups.find(g => g.id === latest.groupId)?.name ?? 'Group removed' : 'No group';
   function useLatest() {
@@ -119,6 +121,7 @@ export function ItemEditor({ initial, plan, busy, onSave, onClose, onDelete }: {
         <form onSubmit={save}>
           <div className="editor-scroll" ref={scroll}>
             <fieldset disabled={busy} className="form-fields">
+              {purchasePrice !== null && purchasePrice !== undefined && <div className="purchase-item-summary"><Check size={18}/><p><strong>Purchased for {money(purchasePrice)}</strong><span>To change actual spend, choose Edit purchase on this item in your list.</span></p></div>}
               <ProductFields value={draft} prefix="main-" onChange={patch => setDraft(d => ({ ...d, ...patch }))}/>
               <div className="form-grid">
                 <label className="field" htmlFor="room">Room<select id="room" value={draft.room} onChange={e => setDraft(d => ({ ...d, room: e.target.value as Item['room'] }))}>{rooms.map(r => <option key={r}>{r}</option>)}</select></label>
@@ -150,7 +153,7 @@ export function ItemEditor({ initial, plan, busy, onSave, onClose, onDelete }: {
                 </div>
                 {expanded === b.id && <div className="backup-fields"><ProductFields value={b} prefix={'backup-' + b.id + '-'} onChange={patch => setDraft(d => ({ ...d, backups: d.backups.map(x => x.id === b.id ? { ...x, ...patch } : x) }))}/></div>}
               </div>)}
-              <p className="form-help"><Info size={15}/> Expected prices can be your Black Friday estimates. Confirm the price before purchasing.</p>
+              <p className="form-help"><Info size={15}/> Budgeted amounts can reflect Black Friday deals. Record what you actually paid after purchasing.</p>
               {error && <div role="alert" className="error-box">{error}</div>}
               {conflict && <div className="conflict-box"><strong>Your shared plan changed</strong>
                 {latest ? <>

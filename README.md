@@ -2,7 +2,7 @@
 
 A responsive shopping planner for two people preparing for a November move. Starts with a **$12,000 budget**: $10,000 personal funds and a $2,000 family gift. Both amounts and the move month are editable.
 
-**Already using the live app? Follow [UPDATE-LIVE-SITE.md](UPDATE-LIVE-SITE.md) to install version 1.1.** Keep your existing Supabase project, Netlify site, and complete plan link.
+**Already using the live app? Follow [UPDATE-LIVE-SITE.md](UPDATE-LIVE-SITE.md) to install version 1.2.** Keep your existing Supabase project, Netlify site, and complete plan link.
 
 For a first installation, follow [START-HERE.md](START-HERE.md). This is a complete Next.js app for Netlify, with Supabase PostgreSQL storage.
 
@@ -13,9 +13,11 @@ For a first installation, follow [START-HERE.md](START-HERE.md). This is a compl
 - Switch between Items and Groups. Create empty groups, link existing purchases, move purchases between groups, or add an item directly to a group.
 - Remove a group without deleting any purchases. Grouping never adds another budget charge.
 - Immediate needs and purchases that can wait, organized by room.
-- Purchase links, image links, expected and current prices, and notes.
-- Expected spend drives budget allocation, remaining funds, immediate needs, and room/group subtotals. Current prices remain available for comparison and as an explicitly identified fallback when expected price is blank.
-- Multiple backup choices per item; promote a backup while retaining the former choice and preserving group membership and list order.
+- Purchase links, image links, **Budgeted amount**, **High-end estimate**, and notes. Budgeted amounts drive allocation, remaining funds, immediate needs, and room/group subtotals. A missing budgeted amount uses the high-end estimate as a clearly labeled fallback.
+- Mark items purchased and record what you paid, including a valid $0 purchase. Purchased items have a distinct appearance; edit the paid amount or undo the purchase when needed.
+- A separate spending summary shows actual total spend, how many items are purchased, and the projected finish: actual spend plus the budgeted amount for items still to buy.
+- Filter Purchased or To buy independently of the immediate/can-wait filter.
+- Multiple backup choices per item; promote a backup while retaining the former choice and preserving group membership and list order. Undo a purchase before changing its main choice.
 - Shared edit links without accounts or sign-in.
 - Cloud saves, periodic refresh, and explicit conflict review when two people edit at once.
 - Responsive phone and desktop layouts, accessible dialogs, and missing-price indicators. Item forms scroll separately from their Save controls.
@@ -32,13 +34,13 @@ Each mutation locks its plan and checks the expected revision. A stale edit rece
 
 Client requests are bound to the current plan link, time out, and cannot apply an older revision over a newer one. View and collapse preferences stay on each device.
 
-See [DATA-MODEL.md](DATA-MODEL.md) for the schema and calculations. Version 1.1 keeps the stored `regular` and `sale` fields: existing regular prices appear as **Current price** and existing sale/target prices appear as **Expected price**. No re-entry of those values is needed.
+See [DATA-MODEL.md](DATA-MODEL.md) for the schema and calculations. Version 1.2 keeps the stored `regular` and `sale` fields: existing Current prices become **High-end estimates**, and existing Expected prices become **Budgeted amounts**. No re-entry is needed. Purchase prices are separate records of what was paid; recording a purchase does not replace its budgeted amount or high-end estimate.
 
 ## Local setup
 
 Use Node.js 22.13 or newer; `.nvmrc` and Netlify select Node 22.
 
-1. For a fresh Supabase project, run `supabase/setup.sql` in its SQL Editor. For an existing version 1.0 project, use the migration described in [UPDATE-LIVE-SITE.md](UPDATE-LIVE-SITE.md).
+1. For a fresh Supabase project, run `supabase/setup.sql` in its SQL Editor. For an existing installation, use the migration sequence described in [UPDATE-LIVE-SITE.md](UPDATE-LIVE-SITE.md).
 2. Copy `.env.example` to `.env.local`, then set `SUPABASE_URL` and `SUPABASE_SECRET_KEY`.
 3. Run `npm ci` and `npm run dev`.
 4. Open the address printed by Next.js.
@@ -51,7 +53,7 @@ The production build can run without credentials. Reading and saving plans requi
 | `npm run build` | Production build |
 | `npm start` | Run the production build locally |
 | `npm run typecheck` | Check TypeScript |
-| `npm test` | Budget, validation, grouping, client-session, and PostgreSQL tests |
+| `npm test` | Budget, purchase tracking, validation, grouping, client-session, and PostgreSQL tests |
 | `npm run test:integration` | Test the built Next.js app and Supabase SDK against isolated PostgreSQL; run the build first |
 
 Tests use an in-memory PGlite PostgreSQL instance and synthetic data. They do not access your live Supabase project. The integration test starts a local HTTP bridge to exercise the actual Supabase SDK and database functions through the production API. Local test success does not confirm your hosted deployment; check the live site after Netlify finishes.
@@ -68,13 +70,14 @@ Tests use an in-memory PGlite PostgreSQL instance and synthetic data. They do no
 | `lib/client.ts` | Request sessions and shared-link handling |
 | `lib/server/supabase.ts` | Server-only database connection |
 | `supabase/setup.sql` | Complete fresh-install schema, access controls, and transactional functions |
-| `supabase/migrations/20261005_groups_expected_price.sql` | Non-destructive upgrade for the existing database |
+| `supabase/migrations/20261005_groups_expected_price.sql` | Version 1.1 grouping upgrade |
+| `supabase/migrations/20261006_purchase_tracking.sql` | Version 1.2 purchase tracking upgrade |
 | `netlify.toml` | Hosting build settings |
 | `UPDATE-LIVE-SITE.md` | Update an existing live installation |
 | `START-HERE.md` | First-time Supabase, GitHub, and Netlify setup |
 
 ## Current scope
 
-Prices are entered manually; totals exclude tax and delivery. Images are supplied by URL, with category icons if an image cannot load. Backup options do not count toward spending until promoted. The app supports up to 300 items per plan, 20 backups per item, and 100 groups per plan. Each purchase belongs to at most one group. Updates from another session refresh periodically when no form or save is active.
+Amounts are entered manually; the app does not add tax or delivery automatically. Include them in the amounts you enter when you want them counted. Images are supplied by URL, with category icons if an image cannot load. Backup options do not count toward spending until promoted. Only a main item can be marked purchased. Deleting a purchased item also removes its paid amount from actual spending; the confirmation warns about this change. The app supports up to 300 items per plan, 20 backups per item, and 100 groups per plan. Each purchase belongs to at most one group. Updates from another session refresh periodically when no form or save is active.
 
-The downloadable packages contain no credentials or real shopping data. The version 1.1 migration retains the existing Supabase shopping records and plan access. Data from the older local/Cloudflare prototype is a separate store and is not automatically imported.
+The downloadable packages contain no credentials or real shopping data. The update migrations retain the existing Supabase shopping records and plan access. Version 1.2 starts existing items as not yet purchased; it never guesses whether you have already bought them. Data from the older local/Cloudflare prototype is a separate store and is not automatically imported.

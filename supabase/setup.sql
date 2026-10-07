@@ -81,13 +81,18 @@ end;
 $$;
 create index if not exists items_plan_group_idx on public.items (plan_id, group_id);
 
--- Keep existing wire/storage names: regular = current price, sale = expected price.
--- An expected purchase price can be higher than today's current price.
+-- Keep existing wire/storage names: regular = worst-case amount, sale = budgeted amount.
+-- Budgeted amounts may be higher than the worst-case amount when estimates change.
 alter table public.items drop constraint if exists items_sale_not_above_regular;
 alter table public.backups drop constraint if exists backups_sale_not_above_regular;
 alter table public.item_groups enable row level security;
 revoke all on table public.item_groups from public, anon, authenticated;
 grant select, insert, update, delete on table public.item_groups to service_role;
+
+-- A null purchase price means not purchased; zero is a valid completed purchase.
+-- Dedicated mutations own this field so legacy item/backup edits cannot erase it.
+alter table public.items add column if not exists purchase_price integer
+  constraint items_purchase_price_valid check (purchase_price between 0 and 100000000);
 
 create or replace function public.planner_valid_cents(p_value jsonb, p_nullable boolean default false)
 returns boolean
@@ -165,7 +170,7 @@ as $$
       select jsonb_agg(jsonb_build_object(
         'id', i.id, 'name', i.name, 'room', i.room, 'need', i.need,
         'priority', i.priority, 'groupId', i.group_id, 'url', i.url, 'image', i.image,
-        'regular', i.regular, 'sale', i.sale, 'notes', i.notes,
+        'regular', i.regular, 'sale', i.sale, 'purchasePrice', i.purchase_price, 'notes', i.notes,
         'backups', coalesce((
           select jsonb_agg(jsonb_build_object(
             'id', b.id, 'name', b.name, 'url', b.url, 'image', b.image,
@@ -221,7 +226,7 @@ begin
     return jsonb_build_object('status', 400, 'error', 'Invalid request.');
   end if;
   v_action := p_action ->> 'action';
-  if v_action not in ('save', 'delete', 'reorder', 'settings', 'saveGroup', 'removeGroup') then
+  if v_action not in ('save', 'delete', 'reorder', 'settings', 'saveGroup', 'removeGroup', 'purchase') then
     return jsonb_build_object('status', 400, 'error', 'Unknown action.');
   end if;
 
@@ -386,6 +391,22 @@ begin
     end if;
     update public.items set group_id = null where plan_id = v_plan.id and group_id = v_group_id;
     delete from public.item_groups where plan_id = v_plan.id and id = v_group_id;
+
+  elsif v_action = 'purchase' then
+    if jsonb_typeof(p_action -> 'id') is distinct from 'string'
+      or (p_action ->> 'id') !~* '^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$' then
+      return jsonb_build_object('status', 400, 'error', 'Invalid item ID.');
+    end if;
+    if not public.planner_valid_cents(p_action -> 'price', true) then
+      return jsonb_build_object('status', 400, 'error', 'Enter a valid purchase amount, or clear the purchase.');
+    end if;
+    v_id := (p_action ->> 'id')::uuid;
+    if not (v_id = any(v_order)) then
+      return jsonb_build_object('status', 404, 'error', 'This item has already been removed.');
+    end if;
+    -- Scope to the locked plan even when another plan reuses an item UUID.
+    update public.items set purchase_price = (p_action ->> 'price')::numeric::integer
+      where plan_id = v_plan.id and id = v_id;
 
   elsif v_action = 'delete' then
     if jsonb_typeof(p_action -> 'id') is distinct from 'string'

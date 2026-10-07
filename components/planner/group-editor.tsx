@@ -47,7 +47,7 @@ export function GroupEditor({ initial, plan, busy, onSave, onClose }: Props) {
   const selectedItems = workingPlan.items.filter(item => selected.includes(item.id));
   const total = selectedItems.reduce((sum, item) => sum + (effectivePrice(item) ?? 0), 0);
   const unknown = selectedItems.filter(item => effectivePrice(item) === null).length;
-  const currentFallback = selectedItems.filter(item => item.sale === null && item.regular !== null).length;
+  const highEndFallback = selectedItems.filter(item => item.sale === null && item.regular !== null).length;
   const otherGroup = (item: Item) => (workingPlan.groups ?? []).find(group => group.id === item.groupId && group.id !== draft.id);
   const movingItems = selectedItems.filter(item => !!otherGroup(item));
   const search = query.trim().toLocaleLowerCase();
@@ -150,7 +150,7 @@ export function GroupEditor({ initial, plan, busy, onSave, onClose }: Props) {
                 <section className="gp-details" aria-label="Group details">
                   <label className="field" htmlFor={idPrefix + '-name'}>Group name <input id={idPrefix + '-name'} autoComplete="off" required maxLength={60} placeholder="e.g. TV setup" value={draft.name} onChange={event => setDraft(group => ({ ...group, name: event.target.value }))} /></label>
                   <label className="field" htmlFor={idPrefix + '-notes'}>Shared note <span className="gp-optional">Optional</span><textarea id={idPrefix + '-notes'} rows={4} maxLength={1000} placeholder="Dimensions, matching finishes, things to check together…" value={draft.notes} onChange={event => setDraft(group => ({ ...group, notes: event.target.value }))} /></label>
-                  <div className="gp-total" aria-live="polite" aria-atomic="true"><span>Expected group total</span><strong>{money(total)}</strong><p>{selectedItems.length} linked item{selectedItems.length === 1 ? '' : 's'}{unknown ? ` · ${unknown} missing a price` : ''}</p>{currentFallback > 0 && <small>Uses current price for {currentFallback} item{currentFallback === 1 ? '' : 's'} without an expected price.</small>}{unknown > 0 && <small className="gp-incomplete">This total is incomplete.</small>}</div>
+                  <div className="gp-total" aria-live="polite" aria-atomic="true"><span>Budgeted group total</span><strong>{money(total)}</strong><p>{selectedItems.length} linked item{selectedItems.length === 1 ? '' : 's'}{unknown ? ` · ${unknown} missing a price` : ''}</p>{highEndFallback > 0 && <small>Uses high-end estimates for {highEndFallback} item{highEndFallback === 1 ? '' : 's'} without a budgeted amount.</small>}{unknown > 0 && <small className="gp-incomplete">This total is incomplete.</small>}</div>
                   <p className="gp-help"><Info size={16} />These items already count in your plan. Linking them never adds to your budget.</p>
                 </section>
                 <section className="gp-members" aria-labelledby={idPrefix + '-items'}>
@@ -160,7 +160,7 @@ export function GroupEditor({ initial, plan, busy, onSave, onClose }: Props) {
                     {filtered.length ? filtered.map(item => { const checked = selected.includes(item.id); const previousGroup = otherGroup(item); return <label key={item.id} className={'gp-choice' + (checked ? ' gp-choice-selected' : '')}>
                       <input type="checkbox" checked={checked} onChange={event => { setSelected(ids => event.target.checked ? [...ids, item.id] : ids.filter(id => id !== item.id)); if (reviewRequired) setReviewConfirmed(false); }} />
                       <span className="gp-choice-info"><strong>{item.name}</strong><span>{item.room} · {item.need === 'now' ? 'Immediate need' : 'Can wait'}</span>{previousGroup && <small><Link2 size={12} />{checked ? 'Moves from ' : ''}{previousGroup.name}</small>}</span>
-                      <span className="gp-choice-price"><strong>{effectivePrice(item) === null ? 'Price TBD' : money(effectivePrice(item)!)}</strong><small>{item.sale !== null ? 'Expected' : item.regular !== null ? 'Current price' : 'Not set'}</small></span>
+                      <span className="gp-choice-price"><strong>{effectivePrice(item) === null ? 'Price TBD' : money(effectivePrice(item)!)}</strong><small>{item.sale !== null ? 'Budgeted' : item.regular !== null ? 'High-end estimate' : 'Not set'}</small></span>
                     </label>; }) : <div className="gp-no-items"><Link2 size={25} /><strong>{plan.items.length ? 'No matching items' : 'A little room to grow'}</strong><p>{plan.items.length ? 'Try another item, room, or group name.' : 'Save an empty group, then add your first item to it.'}</p></div>}
                   </div>
                   <p className="gp-selection-help">Uncheck an item to unlink it. Its details and place in the shopping list stay the same.</p>

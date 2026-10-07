@@ -1,6 +1,6 @@
 # Get Room for Two online
 
-This folder is the converted app: **Next.js + Supabase + Netlify**. It contains the full application source. There is no Cloudflare account or Sites setup involved.
+This folder contains the complete **Room for Two v1.2** app: **Next.js + Supabase + Netlify**, including groups, budget planning, and purchase tracking. There is no Cloudflare account or Sites setup involved.
 
 **Already using the live app?** Follow [UPDATE-LIVE-SITE.md](UPDATE-LIVE-SITE.md) instead. Keep your existing project, repository, and full shared plan URL.
 
@@ -23,10 +23,12 @@ Official guidance: https://supabase.com/docs/guides/getting-started/api-keys
 
 ## 3. Upload the source to GitHub
 
-1. Unzip the download.
+1. Unzip `room-for-two-full-source-v1.2.zip`. The smaller update ZIP is for an existing installation.
 2. Create an empty GitHub repository, for example `room-for-two`. A private repository is fine.
 3. Upload the **contents** of the extracted `room-for-two-supabase` folder, rather than the ZIP itself. `package.json`, `netlify.toml`, `app`, and `supabase` should appear at the repository's top level.
 4. Include `package-lock.json`. Do not upload `node_modules`, `.next`, or a real `.env.local` file.
+
+You can drag folders from Finder directly onto GitHub's upload area; cancel the file picker if it only accepts individual files. If a full-source upload exceeds GitHub's file limit, upload the top-level folders in separate batches to preserve their paths, or use GitHub Desktop to commit the complete folder.
 
 If Finder hides dotfiles during upload, press **Command + Shift + Period** to show them. `.gitignore` and `.nvmrc` should be included; `.env.example` is safe because it contains only placeholders. The package contains no real credentials or shopping data.
 
@@ -64,12 +66,12 @@ Official guidance: https://docs.netlify.com/manage/security/secure-access-to-sit
 ## 6. Open and share your plan
 
 1. Open the live Netlify URL. The app creates an empty plan with a $12,000 budget.
-2. Add an item and refresh to confirm it saved.
+2. Add an item with a **Budgeted amount** and optional **High-end estimate**, then refresh to confirm it saved. Mark it purchased only when you have bought it, and record the amount paid. Actual spending appears separately from the planned budget.
 3. Click **Share plan → Copy shared link**. Send that full link to your partner.
 4. Open it on another device or in a private browser window. Confirm the same list appears without login.
 5. Bookmark the full link, including `#plan=...`. Opening only the bare site URL on a new browser creates a different plan.
 
-The original localhost database is not included or automatically imported. Any existing local shopping items need a separate migration. The original app has been kept intact.
+Data from the earlier localhost prototype is not included or automatically imported. Those items require a separate data migration. If your shopping list is already in Supabase, use the existing-installation update guide instead of creating a new plan.
 
 ## If something goes wrong
 

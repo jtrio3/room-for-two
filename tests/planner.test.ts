@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { metrics, emptyItem, moveItem, promote, itemSchema, groupSchema, type Item, type Group } from '../lib/planner.ts';
+import { metrics, emptyItem, isPurchased, moveItem, promote, itemSchema, groupSchema, type Item, type Group } from '../lib/planner.ts';
 import { groupMembers, sortedGroups, groupMetrics, membershipChanges, membershipIntent, rebaseGroupSelection } from '../lib/groups.ts';
 import { mutationSchema } from '../lib/request.ts';
 
@@ -12,6 +12,8 @@ test('expected spend uses integer cents, honors free expected prices and exclude
   const lamp = item('Free lamp', { regular: 10000, sale: 0, need: 'later' });
   const m = metrics({ personal: 1000000, gift: 200000, items: [sofa, lamp] });
   assert.deepEqual(m, {
+    budgeted: 40000, highEnd: 60000, cushion: 20000, actualSpent: 0, purchasedCount: 0, toBuyCount: 2,
+    toBuyBudgeted: 40000, unknownToBuy: 0, projectedSpend: 40000,
     total: 1200000, current: 60000, expected: 40000, savings: 20000, overage: 0, immediate: 40000,
     unknown: 0, unknownExpected: 0, unknownCurrent: 0, usingCurrent: 0, remaining: 1160000,
     allocated: 40000 / 1200000 * 100, regular: 60000, sale: 40000, unknownRegular: 0,
@@ -48,6 +50,109 @@ test('higher expected prices increase spend and report overage without canceling
 test('zero budget and one-cent overspend stay truthful', () => {
   assert.equal(metrics({ personal: 0, gift: 0, items: [] }).allocated, null);
   assert.equal(metrics({ personal: 1200000, gift: 0, items: [item('Sofa', { sale: 1200001 })] }).remaining, -1);
+});
+
+test('actual spending counts only purchased main items and leaves planned budget metrics unchanged', () => {
+  const purchased = item('Sofa', {
+    regular: 60000, sale: 50000, purchasePrice: 44999,
+    backups: [item('Alternative', { sale: 39999, purchasePrice: 10000 })],
+  });
+  const free = item('Gifted lamp', { regular: 5000, sale: 2500, purchasePrice: 0 });
+  const waiting = item('Speakers', { regular: 15000, sale: 10000 });
+  const m = metrics({ personal: 100000, gift: 0, items: [purchased, free, waiting] });
+  assert.equal(m.actualSpent, 44999);
+  assert.equal(m.purchasedCount, 2);
+  assert.equal(m.toBuyCount, 1);
+  assert.equal(m.toBuyBudgeted, 10000);
+  assert.equal(m.projectedSpend, 54999);
+  assert.equal(m.budgeted, 62500);
+  assert.equal(m.highEnd, 80000);
+  assert.equal(m.cushion, 17500);
+  assert.equal(m.remaining, 37500);
+  assert.equal(m.allocated, 62.5);
+  assert.equal(m.budgeted, m.expected);
+  assert.equal(m.highEnd, m.current);
+  assert.equal(m.cushion, m.savings);
+});
+
+test('missing legacy purchase prices and unknown to-buy prices remain distinguishable from free purchases', () => {
+  const { purchasePrice: _purchasePrice, ...legacy } = item('Legacy');
+  const items = [legacy, item('Unpriced'), item('Free purchase', { purchasePrice: 0 }), item('Fallback', { regular: 1234 })];
+  assert.equal(isPurchased(legacy), false);
+  assert.equal(isPurchased(items[1]), false);
+  assert.equal(isPurchased(items[2]), true);
+  assert.equal(emptyItem().purchasePrice, null);
+  const parsed = itemSchema.parse(legacy);
+  assert.equal(Object.hasOwn(parsed, 'purchasePrice'), false);
+  const m = metrics({ personal: 5000, gift: 0, items });
+  assert.equal(m.actualSpent, 0);
+  assert.equal(m.purchasedCount, 1);
+  assert.equal(m.toBuyCount, 3);
+  assert.equal(m.unknown, 3);
+  assert.equal(m.unknownToBuy, 2);
+  assert.equal(m.toBuyBudgeted, 1234);
+  assert.equal(m.projectedSpend, 1234);
+});
+
+test('undoing a purchase removes actual spend and restores its to-buy budget', () => {
+  const paid = item('Chair', { regular: 80000, sale: 70000, purchasePrice: 65000 });
+  const before = metrics({ personal: 1200000, gift: 0, items: [paid] });
+  const undone = { ...paid, purchasePrice: null };
+  const after = metrics({ personal: 1200000, gift: 0, items: [undone] });
+  assert.equal(isPurchased(undone), false);
+  assert.equal(before.actualSpent, 65000);
+  assert.equal(after.actualSpent, 0);
+  assert.equal(after.purchasedCount, 0);
+  assert.equal(after.toBuyBudgeted, 70000);
+  assert.equal(after.projectedSpend, 70000);
+  assert.equal(after.budgeted, before.budgeted);
+  assert.equal(after.remaining, before.remaining);
+});
+
+test('linking purchased items changes neither actual spending nor whole-plan forecasts', () => {
+  const setup = group('TV setup');
+  const tv = item('TV', { sale: 100000, purchasePrice: 94999, groupId: setup.id });
+  const mount = item('Mount', { sale: 5000, groupId: setup.id });
+  const cable = item('Cable', { sale: 1500, purchasePrice: 0, groupId: setup.id });
+  const items = [tv, mount, cable];
+  const grouped = metrics({ personal: 1200000, gift: 0, items });
+  const ungrouped = metrics({ personal: 1200000, gift: 0, items: items.map(entry => ({ ...entry, groupId: null })) });
+  assert.deepEqual(grouped, ungrouped);
+  const subtotal = groupMetrics(groupMembers({ items }, setup.id));
+  assert.equal(subtotal.actualSpent, 94999);
+  assert.equal(subtotal.purchasedCount, 2);
+  assert.equal(subtotal.toBuyBudgeted, 5000);
+  assert.equal(subtotal.projectedSpend, 99999);
+});
+
+test('a purchased item cannot promote a backup until its purchase has been undone', () => {
+  const backup = item('Alternative sofa', { sale: 35000 });
+  for (const price of [0, 40000]) {
+    const paid = item('Sofa', { sale: 45000, purchasePrice: price, backups: [backup] });
+    assert.equal(promote(paid, backup.id), paid);
+    const undone = { ...paid, purchasePrice: null };
+    const promoted = promote(undone, backup.id);
+    assert.equal(promoted.name, backup.name);
+    assert.equal(promoted.purchasePrice, null);
+  }
+});
+
+test('purchase requests require an explicit bounded cent amount or null to undo', () => {
+  const base = { action: 'purchase', revision: 1, id: crypto.randomUUID() };
+  for (const price of [0, 1, 100000000, null]) {
+    assert.equal(mutationSchema.safeParse({ ...base, price }).success, true);
+  }
+  for (const price of [-1, 1.1, 100000001, '100', undefined, NaN, Infinity]) {
+    assert.equal(mutationSchema.safeParse({ ...base, price }).success, false);
+  }
+  assert.equal(mutationSchema.safeParse({ ...base, price: 10, id: 'bad-id' }).success, false);
+  assert.equal(mutationSchema.safeParse({ ...base, price: 10, revision: -1 }).success, false);
+  assert.equal(mutationSchema.safeParse({ ...base, price: 10, revision: 0.5 }).success, false);
+  assert.equal(mutationSchema.safeParse({ ...base, price: 10, revision: undefined }).success, false);
+  assert.equal(itemSchema.safeParse(item('Free', { purchasePrice: 0 })).success, true);
+  assert.equal(itemSchema.safeParse(item('Invalid', { purchasePrice: -1 })).success, false);
+  assert.equal(itemSchema.safeParse(item('Invalid', { purchasePrice: 0.5 })).success, false);
+  assert.equal(itemSchema.safeParse(item('Invalid', { purchasePrice: 100000001 })).success, false);
 });
 
 test('reordering changes only internal order and promotion preserves membership, timing and rank', () => {

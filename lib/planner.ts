@@ -12,7 +12,7 @@ export const safeUrl = z.string().trim().max(2048).refine(value => {
 const cents = z.number().int().min(0).max(100000000);
 
 // Keep the existing wire names so previously saved prices remain unchanged.
-// regular = current price; sale = expected price (which may be higher or lower).
+// regular = High-end estimate; sale = Budgeted amount (which may be higher or lower).
 export const optionSchema = z.object({
   id: z.string().uuid(),
   name: z.string().trim().min(1, 'Give this option a name.').max(160),
@@ -38,6 +38,7 @@ export const itemSchema = z.object({
   image: safeUrl,
   regular: cents.nullable(),
   sale: cents.nullable(),
+  purchasePrice: cents.nullable().optional(),
   notes: z.string().max(4000),
   backups: z.array(optionSchema).max(20),
 }).superRefine((item, context) => {
@@ -52,6 +53,8 @@ export type Group = z.infer<typeof groupSchema>;
 export type Plan = { id: string; revision: number; personal: number; gift: number; moveMonth: string; updatedAt: number; items: Item[]; groups?: Group[] };
 
 export const effectivePrice = (option: { regular: number | null; sale: number | null }) => option.sale ?? option.regular;
+// An explicitly recorded free purchase counts; a missing legacy field does not.
+export const isPurchased = (item: Pick<Item, 'id' | 'purchasePrice'>) => item.purchasePrice != null;
 export const money = (value: number, decimals = false) => new Intl.NumberFormat('en-US', {
   style: 'currency', currency: 'USD', minimumFractionDigits: decimals || value % 100 !== 0 ? 2 : 0, maximumFractionDigits: 2,
 }).format(value / 100);
@@ -60,6 +63,7 @@ export function metrics(plan: Pick<Plan, 'personal' | 'gift' | 'items'>) {
   const total = plan.personal + plan.gift;
   let current = 0, expected = 0, savings = 0, overage = 0, immediate = 0;
   let unknown = 0, unknownExpected = 0, unknownCurrent = 0, usingCurrent = 0;
+  let actualSpent = 0, purchasedCount = 0, toBuyBudgeted = 0, unknownToBuy = 0;
   for (const item of plan.items) {
     current += item.regular ?? 0;
     const price = effectivePrice(item);
@@ -73,8 +77,18 @@ export function metrics(plan: Pick<Plan, 'personal' | 'gift' | 'items'>) {
       overage += Math.max(0, item.sale - item.regular);
     }
     if (item.need === 'now') immediate += price ?? 0;
+    if (isPurchased(item)) {
+      actualSpent += item.purchasePrice!;
+      purchasedCount++;
+    } else {
+      toBuyBudgeted += price ?? 0;
+      if (price === null) unknownToBuy++;
+    }
   }
   return {
+    budgeted: expected, highEnd: current, cushion: savings,
+    actualSpent, purchasedCount, toBuyCount: plan.items.length - purchasedCount,
+    toBuyBudgeted, unknownToBuy, projectedSpend: actualSpent + toBuyBudgeted,
     total, current, expected, savings, overage, immediate, unknown, unknownExpected, unknownCurrent, usingCurrent,
     remaining: total - expected, allocated: total > 0 ? expected / total * 100 : null,
     // Backward-compatible names for consumers of the original summary.
@@ -91,6 +105,8 @@ export function moveItem(items: Item[], id: string, rank: number) {
 }
 
 export function promote(item: Item, optionId: string): Item {
+  // The payment belongs to this product, so undo its purchase before switching.
+  if (isPurchased(item)) return item;
   const backup = item.backups.find(option => option.id === optionId);
   if (!backup) return item;
   const old: Option = {
@@ -106,5 +122,5 @@ export function promote(item: Item, optionId: string): Item {
 
 export const emptyItem = (): Item => ({
   id: crypto.randomUUID(), name: '', room: 'Living room', need: 'now', priority: 1, groupId: null,
-  url: '', image: '', regular: null, sale: null, notes: '', backups: [],
+  url: '', image: '', regular: null, sale: null, purchasePrice: null, notes: '', backups: [],
 });

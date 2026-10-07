@@ -94,6 +94,18 @@ try {
   assert.equal(plan.groups[0].name, group.name);
   assert.ok(plan.items.every(i => i.groupId === group.id));
   assert.equal(plan.items.length, 2);
+  assert.ok(plan.items.every(i => i.purchasePrice === null));
+  const unpaidRevision = plan.revision;
+  result = await call('PATCH', { action: 'purchase', revision: plan.revision, id: sofa.id, price: 43210 });
+  assert.equal(result.status, 200, JSON.stringify(result.data));
+  plan = result.data;
+  assert.equal(plan.items.find(i => i.id === sofa.id).purchasePrice, 43210);
+  assert.equal((await call()).data.items.find(i => i.id === sofa.id).purchasePrice, 43210);
+  assert.equal((await call('PATCH', { action: 'purchase', revision: unpaidRevision, id: sofa.id, price: 40000 })).status, 409);
+  for (const price of [-1, 0.5, '12.00', 100000001]) {
+    assert.equal((await call('PATCH', { action: 'purchase', revision: plan.revision, id: sofa.id, price })).status, 400);
+  }
+  assert.deepEqual((await call()).data, plan);
   assert.equal((await call('PATCH', { action: 'removeGroup', revision: plan.revision - 1, id: group.id })).status, 409);
   const currentSofa = plan.items.find(i => i.id === sofa.id);
   const legacySave = { ...currentSofa, priority: 2, sale: currentSofa.regular + 5000 };
@@ -103,6 +115,7 @@ try {
   plan = result.data;
   assert.equal(plan.items[0].id, sofa.id, 'Editing cannot change manual position');
   assert.equal(plan.items[0].groupId, group.id, 'Legacy clients preserve membership');
+  assert.equal(plan.items[0].purchasePrice, 43210, 'Item edits preserve recorded purchase amounts');
   assert.ok(plan.items[0].sale > plan.items[0].regular, 'Expected price can exceed current');
   const inlineGroup = { id: randomUUID(), name: 'Reading corner', notes: '' };
   const extra = sampleItem({ name: 'Side table', groupId: inlineGroup.id, priority: 1 });
@@ -125,6 +138,14 @@ try {
   plan = result.data;
   assert.ok(plan.items.every(i => i.groupId === null));
   assert.deepEqual(plan.items.map(({ groupId, ...item }) => item), beforeRemove, 'Removing a group preserves purchases');
+  result = await call('PATCH', { action: 'purchase', revision: plan.revision, id: lamp.id, price: 0 });
+  assert.equal(result.status, 200, JSON.stringify(result.data));
+  plan = result.data;
+  assert.equal(plan.items.find(i => i.id === lamp.id).purchasePrice, 0, 'Zero is a valid purchase');
+  result = await call('PATCH', { action: 'purchase', revision: plan.revision, id: sofa.id, price: null });
+  assert.equal(result.status, 200, JSON.stringify(result.data));
+  plan = result.data;
+  assert.equal(plan.items.find(i => i.id === sofa.id).purchasePrice, null, 'Undo clears actual amount');
   result = await call('PATCH', { action: 'reorder', revision: plan.revision, ids: [lamp.id, sofa.id] });
   assert.equal(result.status, 200, JSON.stringify(result.data));
   plan = result.data;
@@ -135,7 +156,7 @@ try {
   plan = result.data;
   assert.equal(plan.items.length, 1);
   assert.equal((await call('PATCH', { action: 'save', revision: oldRevision, item: sofa })).status, 409);
-  console.log('PASS: production Next.js page + API, Supabase SDK, PostgreSQL, groups, atomic inline creation, expected prices, append/manual order, preserved membership, backups, recovery and concurrent-edit conflicts.');
+  console.log('PASS: production Next.js page + API, Supabase SDK, PostgreSQL, purchase logging/undo/zero/conflicts, groups, inline creation, budgeted amounts, append/manual order, preserved payments and membership, backups and recovery.');
   if (process.argv.includes('--preview')) {
     console.log('Isolated UI test app: ' + origin);
     await new Promise(resolve => { process.once('SIGINT', resolve); process.once('SIGTERM', resolve); });

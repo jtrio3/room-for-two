@@ -1,75 +1,73 @@
-# Update your live Room for Two app to version 1.1
+# Update your live Room for Two app to version 1.2
 
-Use your **existing Supabase project, GitHub repository, and Netlify site**. Your current shopping plan remains at the same complete URL, including `#plan=...`.
+Keep your **existing Supabase project, GitHub repository, Netlify site, and full `#plan=...` link**.
 
-This update adds linked item groups, makes Expected price the main budget figure, hides priority numbers while retaining manual ordering, and fixes the item form's Save controls overlapping fields on smaller screens.
+Version 1.2 renames Expected price to **Budgeted amount** and Current price to **High-end estimate**, adds purchase tracking and actual spending, and improves mobile tag spacing. Existing planning amounts keep their values.
 
-The supplied `room-for-two-update-v1.1.zip` is a **small update package containing changed and new files only**. Keep the other files already in your repository. The full source ZIP is available separately for a fresh checkout; you do not need to upload it to update your live site.
+Use **`room-for-two-update-v1.2.zip`** for an existing installation. It contains changed and new files only; keep the other files in your repository. **`room-for-two-full-source-v1.2.zip`** contains the complete source for a fresh checkout.
 
-## 1. Update the existing Supabase database first
+## 1. Run the database update first
 
-1. Unzip `room-for-two-update-v1.1.zip` on your Mac.
-2. Open [Supabase](https://supabase.com/dashboard) and select the same project your live app already uses.
-3. Open **SQL Editor → New query**.
-4. In the extracted files, open `supabase/migrations/20261005_groups_expected_price.sql` in a text editor.
-5. Copy the **entire file**, paste it into the SQL Editor, and click **Run**.
-6. Wait for the query to succeed before uploading the app changes below. A successful query may say no rows were returned.
+1. Unzip the update package.
+2. Open [Supabase](https://supabase.com/dashboard), select the project your live app already uses, then open **SQL Editor → New query**.
+3. If you **skipped version 1.1** and do not have Groups yet, run the entire `supabase/migrations/20261005_groups_expected_price.sql` file first. It is included in this package. If Groups already works, skip this step.
+4. Open `supabase/migrations/20261006_purchase_tracking.sql` from the extracted package in a text editor. Copy the **entire file** into a new SQL query and click **Run**.
+5. Wait for success before uploading the app changes. A successful query may say no rows were returned.
 
-This migration adds the groups table, adds optional membership to purchases, updates saving functions, and permits expected prices above current prices. It does not delete tables, plans, purchases, prices, backups, or order, and it does not change your plan access keys. Existing purchases begin ungrouped. It is safe to rerun the migration.
+The order matters: the grouping migration, if needed, comes **before** the purchase-tracking migration. After version 1.2 is installed, do not rerun the older grouping migration; it contains older saving functions. The version 1.2 migration itself is safe to rerun.
 
-Use this migration for the existing installation; `supabase/setup.sql` is the complete schema for a fresh installation. Do not create a new Supabase project or reset the database for this update.
+This adds a separate paid-amount field and updates the saving functions. It preserves existing plans, items, groups, backups, prices, ordering, and shared-link access. Existing items initially remain **To buy** until you mark them purchased. It does not guess purchase status or replace your budgeted amounts.
 
-## 2. Upload the update files into the existing GitHub repository
+Use these migrations for an existing installation. `supabase/setup.sql` is the complete schema for a new installation. Keep your existing database and project.
 
-1. Open your existing repository on GitHub.
-2. Select the branch connected to your Netlify production site, usually **main**. Open the repository's top level, where `package.json` and `netlify.toml` already appear.
-3. Choose **Add file → Upload files**.
-4. In Finder, open the extracted update folder until you see files such as `package.json` and folders such as `app`, `lib`, and `supabase`.
-5. Select the **contents of that folder**, then drag them onto GitHub's upload area. Cancel the file-picker window first if it prevents you from selecting folders. Dragging preserves each folder's structure.
-6. Wait for the uploads to finish. Add the commit message **“Add groups and expected prices”**, then commit to the production branch. If your repository requires a pull request, merge it into that branch instead.
+## 2. Upload the files into your existing GitHub repository
 
-Upload the extracted contents, not the ZIP and not an enclosing update folder. Files with the same paths replace their previous versions; new files are added. Leave other repository files in place. If your original project lives in a subfolder configured as Netlify's base directory, upload the contents inside that same subfolder.
+1. Open your repository on GitHub and choose the branch connected to Netlify production, usually **main**.
+2. Open the top level where `package.json` and `netlify.toml` already appear, then choose **Add file → Upload files**.
+3. In Finder, open the extracted update folder until you see `package.json` and folders such as `app`, `components`, `lib`, and `supabase`.
+4. Select the folder's **contents** and drag them onto GitHub's upload area. If the file picker only lets you select files, cancel it and drag directly from Finder. This preserves folders and their contents.
+5. Wait for upload to finish, enter a commit message such as **“Add purchase tracking and budgeted amounts”**, and commit to the production branch. If your repository requires a pull request, merge it into that branch.
 
-**Never upload a real `.env` or `.env.local` file.** This package includes no credentials. Your existing `SUPABASE_URL` and `SUPABASE_SECRET_KEY` stay in Netlify, unchanged. `.env.example`, when present in the full source package, contains placeholders only.
+Upload the contents, not the ZIP or its enclosing folder. Matching paths replace previous files; new paths are added. Leave the rest of the repository in place. If your app already lives in a Netlify base-directory subfolder, upload inside that same subfolder.
 
-## 3. Let Netlify publish the change
+Keep your existing `SUPABASE_URL` and `SUPABASE_SECRET_KEY` in Netlify. No new environment variables are required. Never upload a real `.env` or `.env.local` file; these packages contain no credentials.
 
-1. Open your existing project in [Netlify](https://app.netlify.com/).
-2. Open **Deploys** and find the deployment triggered by your new GitHub commit.
-3. Wait until that production deployment is successfully published.
-4. If no deployment starts, confirm you committed to the connected production branch. If automatic publishing or builds are paused, resume them or use **Trigger deploy → Deploy site** for that existing project.
+## 3. Wait for Netlify to publish
 
-A connected Git repository normally triggers a deployment when its production branch changes; see [Netlify's deployment instructions](https://docs.netlify.com/deploy/create-deploys/). Keep the existing build command, environment variables, site address, and domain settings.
+1. Open the existing project in [Netlify](https://app.netlify.com/) and choose **Deploys**.
+2. Find the deployment triggered by your new GitHub commit and wait for it to publish successfully.
+3. If none starts, check that you committed to the connected production branch. Resume paused builds or use **Trigger deploy → Deploy site** for that project if needed.
 
-These files do not update the live site merely by being downloaded. The Supabase query and successful Netlify deployment are the two required steps.
+A connected production branch normally deploys automatically; see [Netlify's deployment instructions](https://docs.netlify.com/deploy/create-deploys/). Your build settings, environment variables, site address, and domain stay the same. Downloading or uploading SQL files to GitHub does not apply the database update: the Supabase query and the Netlify deployment are separate steps.
 
-## 4. Reopen the same plan and check the update
+## 4. Reopen your plan and check the update
 
-Close older app tabs on both devices, then reopen your bookmarked **full shared URL, including `#plan=...`**. If a device still shows the old interface, reload it; on your Mac, **Command + Shift + R** forces a fresh page load.
+Close old app tabs on both devices, then reopen your bookmarked **full URL with `#plan=...`**. Reload if the old interface appears; **Command + Shift + R** forces a fresh load on your Mac.
 
-Check the following:
+1. Confirm your items, groups, backups, ordering, and existing amounts are present. Expected values should now be labeled **Budgeted amount** and Current values **High-end estimate**.
+2. Mark an item you have bought as **Purchased**, enter what you paid, and save. The item should gain a purchased appearance and the separate actual-spending summary should increase by exactly that amount. A $0 purchase also counts as purchased.
+3. Use the purchased/to-buy filter. Timing filters still work independently, so you can see immediate items that remain to buy.
+4. Edit a purchase amount to correct it, or undo the purchase to return the item to To buy. Actual spending should adjust; its budgeted amount should stay unchanged.
+5. On your phone, check that timing and group tags have space between them and long group names stay contained within the card.
+6. Open the same full link on the second device and confirm the saved changes appear.
 
-1. Your existing purchases, prices, backups, and ordering are still present.
-2. The dashboard uses **Expected spend**. Existing sale/target values now appear as **Expected price**, and existing regular values appear as **Current price**. If expected price is blank, the app identifies its use of current price as a fallback.
-3. Create a group such as **TV setup**, select the TV, mount, and speakers, and save. Switch to Groups view to see their combined expected subtotal. The whole-plan total should not change just from linking them.
-4. Add or edit an item on your phone. Scroll through the form and confirm the Save controls remain separate from the fields.
-5. Create a purchase and confirm it joins the end of the list. Use Items view, All items, and Manual order to move it with the drag handle. Keyboard users can focus the handle and press the up/down arrow keys.
-6. Refresh or reopen the same full link on the second device and confirm the saved changes appear.
+**How the totals work:** Budgeted total, remaining budget, and allocation still describe the plan for all items. Actual total spend counts only logged purchases. Projected total combines actual spend with budgeted amounts for items still to buy. A missing budgeted amount uses its high-end estimate; items missing both are identified as incomplete.
 
-Group removal keeps the individual purchases. A purchase belongs to one optional group, and it counts toward the budget once. Backup choices remain excluded until promoted.
+Backups do not count toward totals. Undo an item's purchase before promoting a backup, so the logged payment stays attached to the correct product. Deleting a purchased item also removes its paid amount from actual spending; the delete confirmation warns about this. Removing a group keeps its items and their purchase records.
 
 ## If something goes wrong
 
 | Symptom | What to do |
 | --- | --- |
-| The site works but groups will not save | Confirm the complete migration ran successfully in the same Supabase project used by Netlify. Updating GitHub does not run SQL automatically. |
-| Expected price above current price is rejected | Run the migration if it was missed, then close old app tabs and reload the newly deployed app. |
-| The old design is still showing | Check that the successful Netlify deployment uses your new commit, then refresh the page. |
+| Items load but recording purchases fails | Run the complete version 1.2 migration in the same Supabase project used by Netlify. GitHub uploads do not run SQL. |
+| The migration says a groups table or column is missing | If version 1.1 was skipped, run its grouping migration, then run the version 1.2 purchase migration. |
+| Purchases stopped saving after an older SQL file was rerun | Run `20261006_purchase_tracking.sql` again to restore the latest functions. |
+| The old interface is still showing | Check that the published Netlify deployment uses your new commit, then refresh. |
 | Netlify does not start a deployment | Check the connected repository and production branch, and whether builds are paused. Trigger a deploy if needed. |
-| Build cannot find files or imports | The update may have been uploaded inside an extra folder. Its `package.json` and `app` folder must replace the original paths. Also confirm all new folders uploaded. |
-| Your old list appears empty | Reopen the original full URL with `#plan=...`. Keep the same Supabase project and existing environment variables. A bare site address in a new browser can create a different plan. |
-| A group changed while you were editing | Review the latest membership using the conflict options before saving. Your draft stays available. |
+| Build cannot find files or imports | Check that the update replaced the original paths, rather than sitting inside an extra folder. Confirm the new component files uploaded. |
+| Your old list appears empty | Reopen the original complete `#plan=...` link. Keep the same Supabase project and environment variables. A bare URL in a new browser can create another plan. |
+| A purchase or item changed while you were editing | Review the latest record in the conflict dialog before retrying. Your draft remains available. |
 
-If you need to restore the earlier interface temporarily, republish the previous successful Netlify deployment. Leave the additive Supabase migration in place; do not drop the new tables or column. The older interface will not display groups and retains its old expected-versus-current price ceiling, so it may refuse to edit an item whose expected price is higher than its current price. Return to version 1.1 to edit such items normally.
+To temporarily restore the previous interface, republish its successful Netlify deployment. Leave the additive database update in place. Version 1.1 will not show or manage purchase records, so use version 1.2 for recording or correcting actual spending. Ordinary item saves from the earlier interface preserve the purchase record while the version 1.2 database functions remain installed.
 
-The package is prepared for you to install; it has not performed a deployment or changed your live Supabase project.
+This package is prepared for you to install. It does not itself deploy the site or change your live Supabase project.
